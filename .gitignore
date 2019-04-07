@@ -1,2 +1,3 @@
 detection/weights
 classification/weights
+detection/data/arcgis_config.py

@@ -5,10 +5,11 @@ from arcgis.geometry import Polygon
 from arcgis.geometry import Geometry
 import sys
 import json
+import arcgis_config
 
 # type of coordinate referrence system 
 crs_id = 3857
-gis = GIS("https://www.arcgis.com", "YuansongFengPro", "Fys19970807!")
+gis = GIS("https://www.arcgis.com", arcgis_config.username, arcgis_config.password)
 
 shp_file = 'raw/bottom_part.shp'
 building_data = SpatialDataFrame.from_featureclass(shp_file)
