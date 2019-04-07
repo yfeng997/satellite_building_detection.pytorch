@@ -1,0 +1,5 @@
+classes= 2
+train=/data/feng/building/config/train_config.txt
+test=/data/feng/building/config/test_config.txt
+names=data/res.names
+backup=backup/
