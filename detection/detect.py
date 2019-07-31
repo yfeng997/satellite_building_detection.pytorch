@@ -10,20 +10,23 @@ import sys
 import time
 import datetime
 import argparse
+import json
 
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torch.autograd import Variable
+import torchvision.transforms as transforms
+# from torchvision.datasets import ImageFolder
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.ticker import NullLocator
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--image_folder', type=str, default='data/samples', help='path to dataset')
+parser.add_argument('--image_folder', type=str, default='data/compose', help='path to dataset')
 parser.add_argument('--config_path', type=str, default='config/yolov3.cfg', help='path to model config file')
-parser.add_argument('--weights_path', type=str, default='', help='path to weights file')
+parser.add_argument('--weights_path', type=str, default='checkpoints/90.weights', help='path to weights file')
 parser.add_argument('--class_path', type=str, default='data/res.names', help='path to class label file')
 parser.add_argument('--conf_thres', type=float, default=0.8, help='object confidence threshold')
 parser.add_argument('--nms_thres', type=float, default=0.4, help='iou thresshold for non-maximum suppression')
@@ -36,19 +39,30 @@ print(opt)
 
 cuda = torch.cuda.is_available() and opt.use_cuda
 
-os.makedirs('output', exist_ok=True)
+os.makedirs('output_t', exist_ok=True)
 
 # Set up model
 model = Darknet(opt.config_path, img_size=opt.img_size)
-model.load_weights(opt.weights_path)
+model.load_state_dict(torch.load(opt.weights_path))
 
 if cuda:
     model.cuda()
 
 model.eval() # Set in evaluation mode
 
-dataloader = DataLoader(ImageFolder(opt.image_folder, img_size=opt.img_size),
-                        batch_size=opt.batch_size, shuffle=False, num_workers=opt.n_cpu)
+
+# Note: ImageFolder is a customized version under utils.datasets.ImageFolder
+# instead of loading image with its label, this ImageFolder loads the image path and the image
+
+dataloader = DataLoader(
+    ImageFolder(
+        opt.image_folder, 
+        img_size=opt.img_size
+    ),
+    batch_size=opt.batch_size, 
+    shuffle=False, 
+    num_workers=opt.n_cpu
+)
 
 classes = load_classes(opt.class_path) # Extracts class labels from file
 
@@ -96,6 +110,9 @@ for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
     fig, ax = plt.subplots(1)
     ax.imshow(img)
 
+    # create output stats
+    stat = []
+
     # The amount of padding that was added
     pad_x = max(img.shape[0] - img.shape[1], 0) * (opt.img_size / max(img.shape))
     pad_y = max(img.shape[1] - img.shape[0], 0) * (opt.img_size / max(img.shape))
@@ -128,10 +145,25 @@ for img_i, (path, detections) in enumerate(zip(imgs, img_detections)):
             # Add label
             plt.text(x1, y1, s=classes[int(cls_pred)], color='white', verticalalignment='top',
                     bbox={'color': color, 'pad': 0})
+            # Add to stats
+            stat.append({
+                        'x1': x1.item(), 
+                        'y1': y1.item(), 
+                        'w': box_w.item(), 
+                        'h': box_h.item(), 
+                        'pred_class': classes[int(cls_pred)],
+                        'pred_conf': cls_conf.item()
+                    })
 
     # Save generated image with detections
     plt.axis('off')
     plt.gca().xaxis.set_major_locator(NullLocator())
     plt.gca().yaxis.set_major_locator(NullLocator())
-    plt.savefig('output/%d.png' % (img_i), bbox_inches='tight', pad_inches=0.0)
+    plt.savefig('output_t/%d.png' % (img_i), bbox_inches='tight', pad_inches=0.0)
     plt.close()
+
+    # Save stored stats
+    # print(stat)
+    # with open('output/%d.json' % (img_i), 'w') as f:
+    #     json.dump(stat, f, indent=4)
+
