@@ -28,7 +28,7 @@ class BuildingDetectionDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return len(self.img_files)
+        return len(self.img_paths)
 
     def __getitem__(self, idx):
         # Load image
@@ -58,12 +58,17 @@ class BuildingDetectionDataset(Dataset):
 
         target = {
             "boxes": torch.FloatTensor(boxes), 
-            "labels": torch.IntTensor(labels), 
-            "area": -1,
-            "iscrowd": False
+            "labels": torch.LongTensor(labels), 
+            "area": torch.LongTensor(0),
+            "iscrowd": torch.LongTensor(0)
         }
 
         return img, target
+
+def custom_collate_fn(batch):
+    data = [item[0] for item in batch]
+    target = [item[1] for item in batch]
+    return (data, target)
 
 # dataset = BuildingDetectionDataset('config/train_config.txt')
 # for (img, target) in dataset:

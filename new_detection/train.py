@@ -13,18 +13,17 @@ import torchnet.meter as meter
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.models as models
 import cv2
-from dataset import BuildingDetectionDataset
+from dataset import BuildingDetectionDataset, custom_collate_fn
+from utils import *
 
 import pdb
     
-def train_or_eval(model, dataloader, criterion, optimizer=None, train=True, device=torch.device('cuda:0')):
-    acc_meter = meter.AverageValueMeter()
-    loss_meter = meter.AverageValueMeter()
+def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.device('cuda:0')):
+    avg_meter = meter.AverageValueMeter()
     if train:
         model.train()
     else:
         model.eval()
-
     for batch_idx, (inputs, targets) in enumerate(dataloader):
         # [N x (C x W x H)]
         inputs = [input.to(device) for input in inputs]
@@ -37,74 +36,93 @@ def train_or_eval(model, dataloader, criterion, optimizer=None, train=True, devi
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            avg_meter.add(loss.item())
         else:
-            outputs = model(inputs)            
-        
-        acc = calculate_metric(outputs, targets)
-        acc_meter.add(acc)
-        loss_meter.add(loss.item())
+            outputs = model(inputs) 
+            targets = [{k: v.to(torch.device('cpu')) for k, v in t.items()} for t in targets]      
+            outputs = [{k: v.to(torch.device('cpu')) for k, v in t.items()} for t in outputs]     
+            mAP = calculate_metric(outputs, targets, device)
+            avg_meter.add(mAP)
 
         if batch_idx % 100 == 0:
-            print('batch: %i loss: %f acc: %f' % (batch_idx, loss_meter.mean, acc_meter.mean))
-    return loss_meter.mean, acc_meter.mean
+            print('batch: %i meter value: %f' % (batch_idx, avg_meter.mean))
+    return avg_meter.mean
 
 # predictions and targets are both torch tensors 
-def calculate_acc(predictions, targets):
-    return (predictions == targets).sum().item() / predictions.size(0)
+def calculate_metric(predictions, targets, device):
+    '''
+    predictions/targets: [{
+        boxes: [[x1, y1, x2, y2], ...], 
+        labels: [0/1, ...],
+        scores: [0.53, 0.23, ...]
+    }, ...]
+    '''
+    average_precisions, mean_average_precision = calculate_mAP(
+        det_boxes=[p['boxes'] for p in predictions], 
+        det_labels=[p['labels'] for p in predictions], 
+        det_scores=[p['scores'] for p in predictions], 
+        true_boxes=[t['boxes'] for t in targets], 
+        true_labels=[t['labels'] for t in targets], 
+        true_difficulties=[torch.IntTensor([1 for l in t['labels']]) for t in targets],
+        device=device
+    )
+    return mean_average_precision
     
 '''
 TODO: check if PyTorch has built-in logging/visualization modules 
 '''
-def output_history_graph(train_acc_history, val_acc_history, train_loss_history, val_loss_history):
-    epochs = len(train_acc_history)
-    plt.figure(0)
-    plt.plot(list(range(epochs)), train_acc_history, label='train')
-    plt.plot(list(range(epochs)), val_acc_history, label='val')
-    plt.legend(loc='upper left')
-    plt.savefig('acc.png')
-    plt.clf()
+# def output_history_graph(train_acc_history, val_acc_history, train_loss_history, val_loss_history):
+#     epochs = len(train_acc_history)
+#     plt.figure(0)
+#     plt.plot(list(range(epochs)), train_acc_history, label='train')
+#     plt.plot(list(range(epochs)), val_acc_history, label='val')
+#     plt.legend(loc='upper left')
+#     plt.savefig('acc.png')
+#     plt.clf()
 
-    plt.figure(1)
-    plt.plot(list(range(epochs)), train_loss_history, label='train')
-    plt.plot(list(range(epochs)), val_loss_history, label='val')
-    plt.legend(loc='upper left')
-    plt.savefig('loss.png')
-    plt.clf()
+#     plt.figure(1)
+#     plt.plot(list(range(epochs)), train_loss_history, label='train')
+#     plt.plot(list(range(epochs)), val_loss_history, label='val')
+#     plt.legend(loc='upper left')
+#     plt.savefig('loss.png')
+#     plt.clf()
 
 # parameters
 data_dir = '/data/feng/building-detect/'
 checkpoint_dir = 'checkpoints'
 learning_rate = 1e-4
 weight_decay = 1e-4
-batch_size = 64
-num_epochs = 150
+batch_size = 2
+num_epochs = 50
 # pretrained_weight = 'unittests/resnet/checkpoints/acc_82.pth.tar'
 device = torch.device('cuda:0')
 
 # load model 
 model = models.detection.fasterrcnn_resnet50_fpn(num_classes=2)
-if pretrained_weight is not None:
-    model.load_state_dict(torch.load(pretrained_weight))
+# if pretrained_weight:
+#     model.load_state_dict(torch.load(pretrained_weight))
 model.to(device)
 
 # define data transform and data loader 
 train_loader = DataLoader(BuildingDetectionDataset(
-    '/home/yuansong/code/building/new_detection/config/train_config.txt'
+    '/home/yuansong/code/building/new_detection/config/train_config.txt',
     transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    ])), batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=4 
+    ])), batch_size=batch_size, shuffle=True, pin_memory=True, 
+    collate_fn=custom_collate_fn 
 )
 val_loader = DataLoader(BuildingDetectionDataset(
-    '/home/yuansong/code/building/new_detection/config/test_config.txt'
+    '/home/yuansong/code/building/new_detection/config/test_config.txt',
     transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    ])),batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=4
+    ])),batch_size=batch_size, shuffle=True, pin_memory=True, 
+    collate_fn=custom_collate_fn 
 )
 
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -116,11 +134,11 @@ val_acc_hist = []
 val_loss_hist = []
 best_acc = 0.0
 for epoch in range(num_epochs):
-    loss, acc = train(model, train_loader, criterion, optimizer, device=device)
-    train_acc_hist.append(acc)
-    train_loss_hist.append(loss)
+    # loss, acc = train_or_eval(model, train_loader, optimizer, train=True, device=device)
+    # train_acc_hist.append(acc)
+    # train_loss_hist.append(loss)
 
-    loss, acc = evaluate(model, val_loader, criterion, train=False, device=device)
+    loss, acc = train_or_eval(model, val_loader, train=False, device=device)
     val_acc_hist.append(acc)
     val_loss_hist.append(loss)
 
