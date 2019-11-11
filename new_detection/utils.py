@@ -13,6 +13,7 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
     :param true_difficulties: list of tensors, one tensor for each image containing actual objects' difficulty (0 or 1)
     :return: list of average precisions for all classes, mean average precision (mAP)
     """
+    # pdb.set_trace()
     voc_labels = ('non-residential', 'residential')
     label_map = {k: v + 1 for v, k in enumerate(voc_labels)}
     label_map['background'] = 0
@@ -111,6 +112,7 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
             # Otherwise, the detection occurs in a different location than the actual object, and is a false positive
             else:
                 false_positives[d] = 1
+            # pdb.set_trace()
 
         # Compute cumulative precision and recall at each detection in the order of decreasing scores
         cumul_true_positives = torch.cumsum(true_positives, dim=0)  # (n_class_detections)
@@ -129,7 +131,6 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
             else:
                 precisions[i] = 0.
         average_precisions[c - 1] = precisions.mean()  # c is in [1, n_classes - 1]
-
     # Calculate Mean Average Precision (mAP)
     mean_average_precision = average_precisions.mean().item()
 
@@ -158,3 +159,34 @@ def find_jaccard_overlap(set_1, set_2):
     union = areas_set_1.unsqueeze(1) + areas_set_2.unsqueeze(0) - intersection  # (n1, n2)
 
     return intersection / union  # (n1, n2)
+
+def find_intersection(set_1, set_2):
+    """
+    Find the intersection of every box combination between two sets of boxes that are in boundary coordinates.
+    :param set_1: set 1, a tensor of dimensions (n1, 4)
+    :param set_2: set 2, a tensor of dimensions (n2, 4)
+    :return: intersection of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
+    """
+
+    # PyTorch auto-broadcasts singleton dimensions
+    lower_bounds = torch.max(set_1[:, :2].unsqueeze(1), set_2[:, :2].unsqueeze(0))  # (n1, n2, 2)
+    upper_bounds = torch.min(set_1[:, 2:].unsqueeze(1), set_2[:, 2:].unsqueeze(0))  # (n1, n2, 2)
+    intersection_dims = torch.clamp(upper_bounds - lower_bounds, min=0)  # (n1, n2, 2)
+    return intersection_dims[:, :, 0] * intersection_dims[:, :, 1]  # (n1, n2)
+
+# testing
+# det_boxes = [torch.FloatTensor([[2.2, 2.2, 4.2, 4.3]])]
+# det_labels = [torch.IntTensor([1])]
+# det_scores = [torch.IntTensor([0.8])]
+# true_boxes = [
+#     torch.FloatTensor([[1, 1, 3, 3], [2, 2, 4, 4]])
+# ]
+# true_labels = [
+#     torch.IntTensor([0, 1])
+# ]
+# true_difficulties = [
+#     torch.IntTensor([0, 0])
+# ]
+# device = torch.device('cpu')
+# mAP = calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, device)
+# pdb.set_trace()

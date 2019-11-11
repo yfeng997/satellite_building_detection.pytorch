@@ -26,10 +26,10 @@ def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.de
         model.eval()
     for batch_idx, (inputs, targets) in enumerate(dataloader):
         # [N x (C x W x H)]
-        inputs = [input.to(device) for input in inputs]
+        inputs = [input_.to(device) for input_ in inputs]
         # [N x {boxes, labels, area, iscrowd}]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        # model behaves differentlt during training vs. evaluation
+        # model behaves differently during training vs. evaluation
         if train:
             loss_dict = model(inputs, targets)
             loss = sum(los for los in loss_dict.values())
@@ -38,14 +38,13 @@ def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.de
             optimizer.step()
             avg_meter.add(loss.item())
         else:
-            outputs = model(inputs) 
-            targets = [{k: v.to(torch.device('cpu')) for k, v in t.items()} for t in targets]      
-            outputs = [{k: v.to(torch.device('cpu')) for k, v in t.items()} for t in outputs]     
+            outputs = model(inputs)  
             mAP = calculate_metric(outputs, targets, device)
             avg_meter.add(mAP)
 
         if batch_idx % 100 == 0:
-            print('batch: %i meter value: %f' % (batch_idx, avg_meter.mean))
+            meter_name = 'total loss' if train else 'mAP'
+            print('batch: %i %s: %f' % (batch_idx, meter_name, avg_meter.mean))
     return avg_meter.mean
 
 # predictions and targets are both torch tensors 
@@ -63,7 +62,7 @@ def calculate_metric(predictions, targets, device):
         det_scores=[p['scores'] for p in predictions], 
         true_boxes=[t['boxes'] for t in targets], 
         true_labels=[t['labels'] for t in targets], 
-        true_difficulties=[torch.IntTensor([1 for l in t['labels']]) for t in targets],
+        true_difficulties=[torch.IntTensor([0 for l in t['labels']]) for t in targets],
         device=device
     )
     return mean_average_precision
@@ -92,13 +91,13 @@ data_dir = '/data/feng/building-detect/'
 checkpoint_dir = 'checkpoints'
 learning_rate = 1e-4
 weight_decay = 1e-4
-batch_size = 2
+batch_size = 10
 num_epochs = 50
-# pretrained_weight = 'unittests/resnet/checkpoints/acc_82.pth.tar'
+# pretrained_weight = 'checkpoints/best.pth.tar'
 device = torch.device('cuda:0')
 
 # load model 
-model = models.detection.fasterrcnn_resnet50_fpn(num_classes=2)
+model = models.detection.fasterrcnn_resnet50_fpn(num_classes=2, pretrained_backbone=True)
 # if pretrained_weight:
 #     model.load_state_dict(torch.load(pretrained_weight))
 model.to(device)
@@ -134,20 +133,19 @@ val_acc_hist = []
 val_loss_hist = []
 best_acc = 0.0
 for epoch in range(num_epochs):
-    # loss, acc = train_or_eval(model, train_loader, optimizer, train=True, device=device)
+    loss = train_or_eval(model, train_loader, optimizer, train=True, device=device)
     # train_acc_hist.append(acc)
     # train_loss_hist.append(loss)
-
-    loss, acc = train_or_eval(model, val_loader, train=False, device=device)
-    val_acc_hist.append(acc)
-    val_loss_hist.append(loss)
+    acc = train_or_eval(model, val_loader, train=False, device=device)
+    # val_acc_hist.append(acc)
+    # val_loss_hist.append(loss)
 
     if acc > best_acc:
         save_path = os.path.join(checkpoint_dir, 'best_acc.pth.tar')
-        # torch.save(model.state_dict(), save_path)
+        torch.save(model.state_dict(), save_path)
         best_acc = acc
         print('model with accuracy %f saved to path %s' % (acc, save_path))
     
     print('****** epoch: %i val loss: %f val acc: %f best_acc: %f ******' % (epoch, loss, acc, best_acc))
 
-    output_history_graph(train_acc_hist, val_acc_hist, train_loss_hist, val_loss_hist)
+    # output_history_graph(train_acc_hist, val_acc_hist, train_loss_hist, val_loss_hist)
