@@ -1,0 +1,4 @@
+train batch: 0 loss: 1.252814 acc: 0.000529
+train batch: 10 loss: 0.378740 acc: 0.000048
+train batch: 20 loss: 0.301942 acc: 0.000025
+train batch: 30 loss: 0.267209 acc: 0.000017

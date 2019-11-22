@@ -11,41 +11,52 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchnet.meter as meter
 from torch.utils.tensorboard import SummaryWriter
-import torchvision.models as models
 import cv2
 from dataset import BuildingDetectionDataset, custom_collate_fn
 from utils import *
+from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn, FastRCNNPredictor
 
 import pdb
     
-def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.device('cuda:0')):
-    avg_meter = meter.AverageValueMeter()
-    if train:
-        model.train()
-    else:
-        model.eval()
+def get_loss(model, inputs, targets, optimizer, backward=True):
+    model.train()
+    loss_dict = model(inputs, targets)
+    loss = sum(los for los in loss_dict.values())
+    if backward:
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    return loss.item()
+
+def get_acc(model, inputs, targets, device):
+    model.eval()
+    outputs = model(inputs)
+    mAP = calculate_metric(outputs, targets, device)
+    return mAP
+
+def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.device('cuda:0'), store=False):
+    acc_meter = meter.AverageValueMeter()
+    loss_meter = meter.AverageValueMeter()
     for batch_idx, (inputs, targets) in enumerate(dataloader):
         # [N x (C x W x H)]
         inputs = [input_.to(device) for input_ in inputs]
         # [N x {boxes, labels, area, iscrowd}]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        # model behaves differently during training vs. evaluation
-        if train:
-            loss_dict = model(inputs, targets)
-            loss = sum(los for los in loss_dict.values())
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            avg_meter.add(loss.item())
-        else:
-            outputs = model(inputs)  
-            mAP = calculate_metric(outputs, targets, device)
-            avg_meter.add(mAP)
-
-        if batch_idx % 100 == 0:
-            meter_name = 'total loss' if train else 'mAP'
-            print('batch: %i %s: %f' % (batch_idx, meter_name, avg_meter.mean))
-    return avg_meter.mean
+        loss = get_loss(model, inputs, targets, optimizer, backward=train)
+        loss_meter.add(loss)
+        mAP = get_acc(model, inputs, targets, device)
+        acc_meter.add(mAP)
+        
+        if (not train) and store:
+            store_results(inputs, outputs, targets)
+        if batch_idx % 10 == 0:
+            tag = 'train' if train else 'val'
+            print('%s batch: %i loss: %f acc: %f' % (tag, batch_idx, loss_meter.mean, acc_meter.mean))
+        if (not train) and batch_idx == 100:
+            return loss_meter.mean, acc_meter.mean
+        # if batch_idx == 100:
+        #     return loss_meter.mean, acc_meter.mean
+    return loss_meter.mean, acc_meter.mean
 
 # predictions and targets are both torch tensors 
 def calculate_metric(predictions, targets, device):
@@ -67,24 +78,21 @@ def calculate_metric(predictions, targets, device):
     )
     return mean_average_precision
     
-'''
-TODO: check if PyTorch has built-in logging/visualization modules 
-'''
-# def output_history_graph(train_acc_history, val_acc_history, train_loss_history, val_loss_history):
-#     epochs = len(train_acc_history)
-#     plt.figure(0)
-#     plt.plot(list(range(epochs)), train_acc_history, label='train')
-#     plt.plot(list(range(epochs)), val_acc_history, label='val')
-#     plt.legend(loc='upper left')
-#     plt.savefig('acc.png')
-#     plt.clf()
+def output_history_graph(train_hist, val_hist):
+    epochs = len(train_hist)
+    plt.figure(0)
+    plt.plot(list(range(epochs)), [x[0] for x in train_hist], label='train')
+    plt.plot(list(range(epochs)), [x[0] for x in val_hist], label='val')
+    plt.legend(loc='upper left')
+    plt.savefig('loss.jpg')
+    plt.clf()
 
-#     plt.figure(1)
-#     plt.plot(list(range(epochs)), train_loss_history, label='train')
-#     plt.plot(list(range(epochs)), val_loss_history, label='val')
-#     plt.legend(loc='upper left')
-#     plt.savefig('loss.png')
-#     plt.clf()
+    plt.figure(1)
+    plt.plot(list(range(epochs)), [x[1] for x in train_hist], label='train')
+    plt.plot(list(range(epochs)), [x[1] for x in val_hist], label='val')
+    plt.legend(loc='upper left')
+    plt.savefig('acc.jpg')
+    plt.clf()
 
 # parameters
 data_dir = '/data/feng/building-detect/'
@@ -93,13 +101,14 @@ learning_rate = 1e-4
 weight_decay = 1e-4
 batch_size = 10
 num_epochs = 50
-# pretrained_weight = 'checkpoints/best.pth.tar'
-device = torch.device('cuda:0')
+# pretrained_weight = 'checkpoints/11_21.pth.tar'
+device = torch.device('cuda:1')
 
 # load model 
-model = models.detection.fasterrcnn_resnet50_fpn(num_classes=2, pretrained_backbone=True)
-# if pretrained_weight:
-#     model.load_state_dict(torch.load(pretrained_weight))
+model = fasterrcnn_resnet50_fpn(pretrained=True)
+in_channels = model.roi_heads.box_predictor.cls_score.in_features
+model.roi_heads.box_predictor = FastRCNNPredictor(in_channels=in_channels, num_classes=2)
+# model.load_state_dict(torch.load(pretrained_weight))
 model.to(device)
 
 # define data transform and data loader 
@@ -127,25 +136,20 @@ val_loader = DataLoader(BuildingDetectionDataset(
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
 # training loop 
-train_acc_hist = []
-train_loss_hist = []
-val_acc_hist = []
-val_loss_hist = []
+train_hist = []
+val_hist = []
 best_acc = 0.0
 for epoch in range(num_epochs):
-    loss = train_or_eval(model, train_loader, optimizer, train=True, device=device)
-    # train_acc_hist.append(acc)
-    # train_loss_hist.append(loss)
-    acc = train_or_eval(model, val_loader, train=False, device=device)
-    # val_acc_hist.append(acc)
-    # val_loss_hist.append(loss)
+    train_loss, train_acc = train_or_eval(model, train_loader, optimizer, train=True, device=device)
+    train_hist.append([train_loss, train_acc])
+    val_loss, val_acc = train_or_eval(model, val_loader, train=False, device=device, store=False)
+    val_hist.append([val_loss, val_acc])
 
-    if acc > best_acc:
+    if val_acc > best_acc:
         save_path = os.path.join(checkpoint_dir, 'best_acc.pth.tar')
         torch.save(model.state_dict(), save_path)
-        best_acc = acc
-        print('model with accuracy %f saved to path %s' % (acc, save_path))
+        best_acc = val_acc
+        print('model with val accuracy %f saved to path %s' % (val_acc, save_path))
     
-    print('****** epoch: %i val loss: %f val acc: %f best_acc: %f ******' % (epoch, loss, acc, best_acc))
-
-    # output_history_graph(train_acc_hist, val_acc_hist, train_loss_hist, val_loss_hist)
+    print('****** epoch: %i train loss: %f train acc: %f val loss: %f val acc: %f best_acc: %f ******' % (epoch, train_loss, train_acc, val_loss, val_acc, best_acc))
+    output_history_graph(train_hist, val_hist)

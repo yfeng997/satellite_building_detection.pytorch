@@ -1,5 +1,40 @@
 import torch
 import pdb
+import cv2
+import os
+import numpy as np
+
+def _normalize(img):
+    img = img - np.min(img)
+    img = img / np.max(img)
+    img = np.uint8(255 * img)
+    return img
+
+def store_results(images, predictions, targets, output_dir='output'):
+    """
+    Args
+    images: [N x (C x W x H)]
+    predictions: [N x {boxes[[x1, y1, x2, y2], ...], labels[0/1, ...], ...}]
+    labels: [N x {boxes, labels, ...}]
+    """
+    for idx, image in enumerate(images):
+        image = image.cpu().numpy()
+        image = _normalize(image)
+        image = np.moveaxis(image, 0, -1).copy()
+        boxes = predictions[idx]['boxes'].cpu().detach().numpy()
+        labels = predictions[idx]['labels'].cpu().numpy()
+        for b, box in enumerate(boxes):
+            x1 = box[0]
+            y1 = box[1]
+            x2 = box[2]
+            y2 = box[3]
+            l = labels[b]
+            color = (255,0,0) if l == 1 else (0,255,0)
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, 1)
+            # print(box)
+        cv2.imwrite(os.path.join(output_dir, str(idx)+'.jpg'), image)
+        print('image outputted to %s' % os.path.join(output_dir, str(idx)+'.jpg'))
+
 
 def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties, device):
     """
