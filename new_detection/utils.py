@@ -4,6 +4,9 @@ import cv2
 import os
 import numpy as np
 
+def tensor_memory(tensor):
+    return tensor.element_size() * tensor.nelement() / 1e6
+
 def _normalize(img):
     img = img - np.min(img)
     img = img / np.max(img)

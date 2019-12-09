@@ -14,8 +14,9 @@ from torch.utils.tensorboard import SummaryWriter
 import cv2
 from dataset import BuildingDetectionDataset, custom_collate_fn
 from utils import *
-from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn, FastRCNNPredictor
-
+from model import fasterrcnn_resnet18_fpn
+from datetime import datetime
+import time
 import pdb
     
 def get_loss(model, inputs, targets, optimizer, backward=True):
@@ -28,38 +29,42 @@ def get_loss(model, inputs, targets, optimizer, backward=True):
         optimizer.step()
     return loss.item()
 
-def get_acc(model, inputs, targets, device):
+def get_acc(model, inputs, targets):
     model.eval()
     outputs = model(inputs)
-    mAP = calculate_metric(outputs, targets, device)
-    return mAP
+    cpu_device = torch.device('cpu')
+    mAP = calculate_metric(outputs, targets, device=cpu_device)
+    return mAP, outputs
 
 def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.device('cuda:0'), store=False):
     acc_meter = meter.AverageValueMeter()
     loss_meter = meter.AverageValueMeter()
     for batch_idx, (inputs, targets) in enumerate(dataloader):
+        start_time = time.time()
         # [N x (C x W x H)]
         inputs = [input_.to(device) for input_ in inputs]
         # [N x {boxes, labels, area, iscrowd}]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        mAP, preds = get_acc(model, inputs, targets)
+        acc_meter.add(mAP)
         loss = get_loss(model, inputs, targets, optimizer, backward=train)
         loss_meter.add(loss)
-        mAP = get_acc(model, inputs, targets, device)
-        acc_meter.add(mAP)
         
         if (not train) and store:
-            store_results(inputs, outputs, targets)
+            store_results(inputs, preds, targets)
         if batch_idx % 10 == 0:
             tag = 'train' if train else 'val'
-            print('%s batch: %i loss: %f acc: %f' % (tag, batch_idx, loss_meter.mean, acc_meter.mean))
-        if (not train) and batch_idx == 100:
+            curr_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            delta_time = (time.time() - start_time) * 48
+            print('%s %s batch: %i loss: %f acc: %f epoch time: %f' % (curr_time, tag, batch_idx, loss_meter.mean, acc_meter.mean, delta_time))
+        if (not train) and batch_idx == 20:
             return loss_meter.mean, acc_meter.mean
-        # if batch_idx == 100:
-        #     return loss_meter.mean, acc_meter.mean
+        if batch_idx == 100:
+            return loss_meter.mean, acc_meter.mean
     return loss_meter.mean, acc_meter.mean
 
 # predictions and targets are both torch tensors 
-def calculate_metric(predictions, targets, device):
+def calculate_metric(predictions, targets, device=torch.device('cpu')):
     '''
     predictions/targets: [{
         boxes: [[x1, y1, x2, y2], ...], 
@@ -97,20 +102,20 @@ def output_history_graph(train_hist, val_hist):
 # parameters
 data_dir = '/data/feng/building-detect/'
 checkpoint_dir = 'checkpoints'
-learning_rate = 1e-4
-weight_decay = 1e-4
-batch_size = 10
-num_epochs = 50
-# pretrained_weight = 'checkpoints/11_21.pth.tar'
+lr = 5e-5
+weight_decay = 0
+batch_size = 16
+num_epochs = 1000
+pretrained_weight = 'checkpoints/best_acc.pth.tar'
 device = torch.device('cuda:1')
 
-# load model 
-model = fasterrcnn_resnet50_fpn(pretrained=True)
-in_channels = model.roi_heads.box_predictor.cls_score.in_features
-model.roi_heads.box_predictor = FastRCNNPredictor(in_channels=in_channels, num_classes=2)
-# model.load_state_dict(torch.load(pretrained_weight))
-model.to(device)
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+# load model 
+model = fasterrcnn_resnet18_fpn(num_classes=2, pretrained_backbone=True)
+model.load_state_dict(torch.load(pretrained_weight))
+model.to(device)
 # define data transform and data loader 
 train_loader = DataLoader(BuildingDetectionDataset(
     '/home/yuansong/code/building/new_detection/config/train_config.txt',
@@ -119,7 +124,7 @@ train_loader = DataLoader(BuildingDetectionDataset(
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    ])), batch_size=batch_size, shuffle=True, pin_memory=True, 
+    ])), batch_size=batch_size, shuffle=True, pin_memory=False, 
     collate_fn=custom_collate_fn 
 )
 val_loader = DataLoader(BuildingDetectionDataset(
@@ -129,11 +134,11 @@ val_loader = DataLoader(BuildingDetectionDataset(
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    ])),batch_size=batch_size, shuffle=True, pin_memory=True, 
+    ])),batch_size=batch_size, shuffle=True, pin_memory=False, 
     collate_fn=custom_collate_fn 
 )
 
-optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 # training loop 
 train_hist = []

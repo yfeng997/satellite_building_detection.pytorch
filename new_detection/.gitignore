@@ -1,2 +1,6 @@
 checkpoints/*
 __pycache__/*
+output/*
+acc.jpg
+loss.jpg
+log.txt
