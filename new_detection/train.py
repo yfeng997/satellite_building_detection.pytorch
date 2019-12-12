@@ -50,16 +50,16 @@ def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.de
         loss = get_loss(model, inputs, targets, optimizer, backward=train)
         loss_meter.add(loss)
         
-        if (not train) and store:
+        if store:
             store_results(inputs, preds, targets)
         if batch_idx % 10 == 0:
             tag = 'train' if train else 'val'
             curr_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            delta_time = (time.time() - start_time) * 48
+            delta_time = (time.time() - start_time) * 120
             print('%s %s batch: %i loss: %f acc: %f epoch time: %f' % (curr_time, tag, batch_idx, loss_meter.mean, acc_meter.mean, delta_time))
-        if (not train) and batch_idx == 20:
+        if (not train) and batch_idx == 200:
             return loss_meter.mean, acc_meter.mean
-        if batch_idx == 100:
+        if batch_idx == 500:
             return loss_meter.mean, acc_meter.mean
     return loss_meter.mean, acc_meter.mean
 
@@ -103,9 +103,9 @@ def output_history_graph(train_hist, val_hist):
 data_dir = '/data/feng/building-detect/'
 checkpoint_dir = 'checkpoints'
 lr = 5e-5
-weight_decay = 0
+weight_decay = 1e-3
 batch_size = 16
-num_epochs = 1000
+num_epochs = 500
 pretrained_weight = 'checkpoints/best_acc.pth.tar'
 device = torch.device('cuda:1')
 
@@ -114,7 +114,7 @@ def count_parameters(model):
 
 # load model 
 model = fasterrcnn_resnet18_fpn(num_classes=2, pretrained_backbone=True)
-model.load_state_dict(torch.load(pretrained_weight))
+# model.load_state_dict(torch.load(pretrained_weight))
 model.to(device)
 # define data transform and data loader 
 train_loader = DataLoader(BuildingDetectionDataset(
@@ -145,7 +145,7 @@ train_hist = []
 val_hist = []
 best_acc = 0.0
 for epoch in range(num_epochs):
-    train_loss, train_acc = train_or_eval(model, train_loader, optimizer, train=True, device=device)
+    train_loss, train_acc = train_or_eval(model, train_loader, optimizer, train=True, device=device, store=False)
     train_hist.append([train_loss, train_acc])
     val_loss, val_acc = train_or_eval(model, val_loader, train=False, device=device, store=False)
     val_hist.append([val_loss, val_acc])

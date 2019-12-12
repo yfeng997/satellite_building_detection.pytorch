@@ -1,0 +1,7 @@
+Use as small a network as possible at first. 
+The current fasterrcnn_resnet18_fpn has 21M parameters.
+Official resnet18 from PyTorch has 11M parameters, which should be a 
+good guideline adjusting the number of model parameters.  
+
+Try to overfit a small dataset first(one image), and observe train/val loss
+and accuracy. 
