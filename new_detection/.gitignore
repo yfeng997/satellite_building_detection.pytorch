@@ -4,3 +4,4 @@ output/*
 acc.jpg
 loss.jpg
 log.txt
+eval_result.json

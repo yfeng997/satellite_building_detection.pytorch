@@ -47,17 +47,16 @@ def train_or_eval(model, dataloader, optimizer=None, train=True, device=torch.de
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         mAP, preds = get_acc(model, inputs, targets)
         acc_meter.add(mAP)
+        if store:
+            output_annotated_images(inputs, targets)
         loss = get_loss(model, inputs, targets, optimizer, backward=train)
         loss_meter.add(loss)
-        
-        if store:
-            store_results(inputs, preds, targets)
         if batch_idx % 10 == 0:
             tag = 'train' if train else 'val'
             curr_time = datetime.now().strftime("%Y-%m-%d %H:%M")
             delta_time = (time.time() - start_time) * 120
             print('%s %s batch: %i loss: %f acc: %f epoch time: %f' % (curr_time, tag, batch_idx, loss_meter.mean, acc_meter.mean, delta_time))
-        if (not train) and batch_idx == 200:
+        if (not train) and batch_idx == 100:
             return loss_meter.mean, acc_meter.mean
         if batch_idx == 500:
             return loss_meter.mean, acc_meter.mean
@@ -102,8 +101,7 @@ def output_history_graph(train_hist, val_hist):
 # parameters
 data_dir = '/data/feng/building-detect/'
 checkpoint_dir = 'checkpoints'
-lr = 5e-5
-weight_decay = 1e-3
+lr = 3e-4
 batch_size = 16
 num_epochs = 500
 pretrained_weight = 'checkpoints/best_acc.pth.tar'
@@ -134,11 +132,11 @@ val_loader = DataLoader(BuildingDetectionDataset(
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    ])),batch_size=batch_size, shuffle=True, pin_memory=False, 
+    ])),batch_size=batch_size, shuffle=False, pin_memory=False, 
     collate_fn=custom_collate_fn 
 )
 
-optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+optimizer = optim.Adam(model.parameters(), lr=lr)
 
 # training loop 
 train_hist = []
@@ -149,7 +147,7 @@ for epoch in range(num_epochs):
     train_hist.append([train_loss, train_acc])
     val_loss, val_acc = train_or_eval(model, val_loader, train=False, device=device, store=False)
     val_hist.append([val_loss, val_acc])
-
+    
     if val_acc > best_acc:
         save_path = os.path.join(checkpoint_dir, 'best_acc.pth.tar')
         torch.save(model.state_dict(), save_path)

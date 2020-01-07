@@ -34,11 +34,11 @@ def calculate_iou(target, pred):
     return iou
 
 data_dir = '/data/feng/building-detect/'
-pretrained_weight = 'checkpoints/best_acc.pth.tar'
+pretrained_weight = 'checkpoints/12_14.pth.tar'
 device = torch.device('cuda:2')
 batch_size = 10
-eval_size = 100
-iou_threshold = 0.5
+eval_size = 5000
+iou_threshold = 0.2
 
 model = fasterrcnn_resnet18_fpn(num_classes=2, pretrained_backbone=True)
 model.load_state_dict(torch.load(pretrained_weight))

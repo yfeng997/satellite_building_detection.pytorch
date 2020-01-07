@@ -13,19 +13,18 @@ def _normalize(img):
     img = np.uint8(255 * img)
     return img
 
-def store_results(images, predictions, targets, output_dir='output'):
+def output_annotated_images(images, annotations, output_dir='output'):
     """
     Args
     images: [N x (C x W x H)]
-    predictions: [N x {boxes[[x1, y1, x2, y2], ...], labels[0/1, ...], ...}]
-    labels: [N x {boxes, labels, ...}]
+    annotations: [N x {boxes[[x1, y1, x2, y2], ...], labels[0/1, ...], ...}]
     """
     for idx, image in enumerate(images):
         image = image.cpu().numpy()
         image = _normalize(image)
         image = np.moveaxis(image, 0, -1).copy()
-        boxes = predictions[idx]['boxes'].cpu().detach().numpy()
-        labels = predictions[idx]['labels'].cpu().numpy()
+        boxes = annotations[idx]['boxes'].cpu().detach().numpy()
+        labels = annotations[idx]['labels'].cpu().numpy()
         for b, box in enumerate(boxes):
             x1 = box[0]
             y1 = box[1]
